@@ -71,7 +71,6 @@ function persistir() {
 document.addEventListener('DOMContentLoaded', () => {
   actualizarFechaHeader();
   iniciarSincronizacionFirebase();
-  registrarServiceWorker();
   verificarRecordatorios();
 });
 
@@ -82,14 +81,6 @@ function actualizarFechaHeader() {
   const elDate = document.getElementById('header-date');
   if (elDate) {
     elDate.textContent = fechaTexto.charAt(0).toUpperCase() + fechaTexto.slice(1);
-  }
-}
-
-function registrarServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js')
-      .then(() => console.log('Service Worker Registrado'))
-      .catch(err => console.error('Error Service Worker:', err));
   }
 }
 
@@ -497,7 +488,6 @@ function importarDatos(e) {
 }
 
 function verificarRecordatorios() {
-  // Función auxiliar para notificaciones nativas si están permitidas
   if ("Notification" in window && Notification.permission === "granted") {
     // Lógica opcional de recordatorios
   }
