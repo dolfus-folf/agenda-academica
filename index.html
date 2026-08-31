@@ -157,11 +157,12 @@
     <button class="nav-btn" onclick="cambiarVista('notas', this)">Notas</button>
   </nav>
 
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  <!-- SDKs de Firebase Compat (Carga Síncrona Garantizada) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
-// Configuración con tus claves reales de Firebase
+  <script>
+    // Configuración de tu proyecto de Firebase
     const firebaseConfig = {
       apiKey: "AIzaSyCd3Jcgu2jkTucCgZ3-lJ_exygUIDG3OHk",
       authDomain: "agenda-academica-f2111.firebaseapp.com",
@@ -171,12 +172,9 @@
       appId: "1:893970697850:web:769c5f8ec78a7367ef35c3"
     };
 
-    // Exponer instancias al ámbito global para app.js
-    const app = initializeApp(firebaseConfig);
-    window.db = getFirestore(app);
-    window.fsDoc = doc;
-    window.fsOnSnapshot = onSnapshot;
-    window.fsSetDoc = setDoc;
+    // Inicializar Firebase
+    firebase.initializeApp(firebaseConfig);
+    window.db = firebase.firestore();
   </script>
 
   <script src="app.js"></script>

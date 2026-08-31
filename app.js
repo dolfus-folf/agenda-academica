@@ -1,4 +1,4 @@
-// Estado global en memoria
+// Estado global de la aplicación
 let state = {
   cursos: [],
   tareas: [],
@@ -10,63 +10,64 @@ let filtroActual = 'todas';
 let tareaEditandoId = null;
 let cursoEditandoId = null;
 
-// Identificador del documento único en Firestore
-const DOC_ID = "mi_agenda_usuario"; 
+const DOC_ID = "mi_agenda_usuario";
 
-// Escuchar cambios en la nube en tiempo real
+// ==========================================
+// SINCRONIZACIÓN Y PERSISTENCIA (FIREBASE)
+// ==========================================
+
 function iniciarSincronizacionFirebase() {
-  if (!window.db) {
-    setTimeout(iniciarSincronizacionFirebase, 300);
-    return;
-  }
+  if (!window.db) return;
 
-  const docRef = window.fsDoc(window.db, "agendas", DOC_ID);
-  
-  // onSnapshot escucha cambios en tiempo real desde Firestore
-  window.fsOnSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      state = {
-        cursos: data.cursos || [],
-        tareas: data.tareas || [],
-        notas: data.notas || [],
-        calificaciones: data.calificaciones || []
-      };
-      renderizarTodo();
-    } else {
-      // Si el documento en la nube aún no existe, cargamos lo local o lo creamos
-      const localCursos = JSON.parse(localStorage.getItem('app_cursos')) || [];
-      const localTareas = JSON.parse(localStorage.getItem('app_tareas')) || [];
-      const localNotas = JSON.parse(localStorage.getItem('app_notas')) || [];
-      const localCalificaciones = JSON.parse(localStorage.getItem('app_calificaciones')) || [];
+  // Escuchar cambios en tiempo real desde Firestore
+  window.db.collection("agendas").doc(DOC_ID)
+    .onSnapshot((docSnap) => {
+      if (docSnap.exists) {
+        const data = docSnap.data();
+        state = {
+          cursos: data.cursos || [],
+          tareas: data.tareas || [],
+          notas: data.notas || [],
+          calificaciones: data.calificaciones || []
+        };
+        renderizarTodo();
+      } else {
+        // Cargar respaldo local si no hay documento en la nube aún
+        const localCursos = JSON.parse(localStorage.getItem('app_cursos')) || [];
+        const localTareas = JSON.parse(localStorage.getItem('app_tareas')) || [];
+        const localNotas = JSON.parse(localStorage.getItem('app_notas')) || [];
+        const localCalificaciones = JSON.parse(localStorage.getItem('app_calificaciones')) || [];
 
-      if (localCursos.length || localTareas.length) {
-        state = { cursos: localCursos, tareas: localTareas, notas: localNotas, calificaciones: localCalificaciones };
-        persistir();
+        if (localCursos.length || localTareas.length || localNotas.length) {
+          state = { cursos: localCursos, tareas: localTareas, notas: localNotas, calificaciones: localCalificaciones };
+          persistir();
+        }
       }
-    }
-  });
+    }, (err) => {
+      console.error("Error al sincronizar Firestore en tiempo real:", err);
+    });
 }
 
-// Guardar los cambios hacia Firestore (y respaldo local)
 function persistir() {
-  // Guardar copia de respaldo en el almacenamiento local del navegador
+  // Guardar en almacenamiento local como respaldo offline
   localStorage.setItem('app_cursos', JSON.stringify(state.cursos));
   localStorage.setItem('app_tareas', JSON.stringify(state.tareas));
   localStorage.setItem('app_notas', JSON.stringify(state.notas));
   localStorage.setItem('app_calificaciones', JSON.stringify(state.calificaciones));
-  
+
   renderizarTodo();
 
-  // Enviar cambio a Firebase Firestore
+  // Guardar en la base de datos remota de Firebase
   if (window.db) {
-    const docRef = window.fsDoc(window.db, "agendas", DOC_ID);
-    window.fsSetDoc(docRef, state)
-      .catch(err => console.error("Error al sincronizar con Firebase:", err));
+    window.db.collection("agendas").doc(DOC_ID).set(state)
+      .catch(err => console.error("Error al guardar datos en Firestore:", err));
   }
 }
 
-// Inicialización
+// ==========================================
+// INICIALIZACIÓN
+// ==========================================
+
 document.addEventListener('DOMContentLoaded', () => {
   actualizarFechaHeader();
   iniciarSincronizacionFirebase();
@@ -74,566 +75,430 @@ document.addEventListener('DOMContentLoaded', () => {
   verificarRecordatorios();
 });
 
+function actualizarFechaHeader() {
+  const now = new Date();
+  const options = { weekday: 'long', day: 'numeric', month: 'long' };
+  const fechaTexto = now.toLocaleDateString('es-ES', options);
+  const elDate = document.getElementById('header-date');
+  if (elDate) {
+    elDate.textContent = fechaTexto.charAt(0).toUpperCase() + fechaTexto.slice(1);
+  }
+}
+
 function registrarServiceWorker() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js')
-      .then(() => console.log('SW Registrado'))
-      .catch(err => console.error('Error al registrar SW:', err));
+      .then(() => console.log('Service Worker Registrado'))
+      .catch(err => console.error('Error Service Worker:', err));
   }
 }
 
-function showToast(mensaje, tipo = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = `toast ${tipo}`;
-  toast.innerText = mensaje;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
-}
+// ==========================================
+// NAVEGACIÓN Y VISTAS
+// ==========================================
 
-function persistir() {
-  localStorage.setItem('app_cursos', JSON.stringify(state.cursos));
-  localStorage.setItem('app_tareas', JSON.stringify(state.tareas));
-  localStorage.setItem('app_notas', JSON.stringify(state.notas));
-  localStorage.setItem('app_calificaciones', JSON.stringify(state.calificaciones));
-  renderizarTodo();
-}
-
-function exportarDatos() {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
-  const anchor = document.createElement('a');
-  anchor.setAttribute("href", dataStr);
-  anchor.setAttribute("download", `agenda_backup_${new Date().toISOString().split('T')[0]}.json`);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  showToast("Copia de seguridad descargada", "success");
-}
-
-function importarDatos(event) {
-  const fileReader = new FileReader();
-  fileReader.onload = (e) => {
-    try {
-      const data = JSON.parse(e.target.result);
-      if (data.cursos && data.tareas) {
-        state = {
-          cursos: data.cursos || [],
-          tareas: data.tareas || [],
-          notas: data.notas || [],
-          calificaciones: data.calificaciones || []
-        };
-        persistir();
-        showToast("¡Datos importados correctamente!", "success");
-      } else {
-        showToast("El archivo JSON no es válido", "danger");
-      }
-    } catch (err) {
-      showToast("Error al leer el archivo", "danger");
-    }
-  };
-  if (event.target.files[0]) {
-    fileReader.readAsText(event.target.files[0]);
-  }
-}
-
-function solicitarNotificaciones() {
-  if (!("Notification" in window)) {
-    showToast("Tu navegador no soporta notificaciones", "danger");
-    return;
-  }
-  Notification.requestPermission().then(perm => {
-    if (perm === "granted") {
-      showToast("¡Notificaciones activadas!", "success");
-      verificarRecordatorios();
-    } else {
-      showToast("Permiso de notificaciones denegado", "danger");
-    }
-  });
-}
-
-function verificarRecordatorios() {
-  if (Notification.permission !== "granted") return;
-  const hoyStr = new Date().toISOString().split('T')[0];
-  const pendientesHoy = state.tareas.filter(t => !t.completada && t.fecha && t.fecha.startsWith(hoyStr));
-  if (pendientesHoy.length > 0) {
-    new Notification("Agenda Académica", {
-      body: `Tienes ${pendientesHoy.length} entrega(s) pendiente(s) para hoy.`,
-      icon: "https://cdn-icons-png.flaticon.com/512/3652/3652191.png"
-    });
-  }
-}
-
-function cambiarVista(vistaId, btnElement) {
+function cambiarVista(vistaId, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 
-  const vistaEl = document.getElementById(`view-${vistaId}`);
-  if (vistaEl) vistaEl.classList.add('active');
-  if (btnElement) btnElement.classList.add('active');
+  const targetView = document.getElementById(`view-${vistaId}`);
+  if (targetView) targetView.classList.add('active');
+  if (btn) btn.classList.add('active');
 
-  const titulos = { hoy: 'Hoy', tareas: 'Todas las Tareas', cursos: 'Mis Cursos', notas: 'Bloc Temporal' };
   const headerTitle = document.getElementById('header-title');
-  if (headerTitle) headerTitle.innerText = titulos[vistaId] || 'Hoy';
-}
-
-function abrirModal() { 
-  tareaEditandoId = null;
-  cursoEditandoId = null;
-  const fTarea = document.getElementById('form-tarea');
-  const fCurso = document.getElementById('form-curso');
-  const fNota = document.getElementById('form-nota');
-  if (fTarea) fTarea.reset();
-  if (fCurso) fCurso.reset();
-  if (fNota) fNota.reset();
-  
-  poblarSelectCursos();
-  document.getElementById('modal-form').classList.remove('hidden'); 
-}
-
-function cerrarModal() { 
-  document.getElementById('modal-form').classList.add('hidden'); 
-  tareaEditandoId = null;
-  cursoEditandoId = null;
-}
-
-function switchFormType(tipo) {
-  document.getElementById('form-tarea').classList.toggle('hidden', tipo !== 'tarea');
-  document.getElementById('form-curso').classList.toggle('hidden', tipo !== 'curso');
-  document.getElementById('form-nota').classList.toggle('hidden', tipo !== 'nota');
-
-  document.getElementById('tab-opt-tarea').classList.toggle('active', tipo === 'tarea');
-  document.getElementById('tab-opt-curso').classList.toggle('active', tipo === 'curso');
-  document.getElementById('tab-opt-nota').classList.toggle('active', tipo === 'nota');
-}
-
-function setSemanas(num) {
-  const inputSemanas = document.getElementById('course-weeks');
-  if (inputSemanas) inputSemanas.value = num;
-}
-
-// TAREAS
-function guardarTarea(e) {
-  e.preventDefault();
-  const titulo = document.getElementById('task-title').value.trim();
-  const cursoId = document.getElementById('task-course').value;
-  const fecha = document.getElementById('task-date').value;
-
-  if (!titulo || !fecha) return;
-
-  if (tareaEditandoId) {
-    state.tareas = state.tareas.map(t => 
-      t.id === tareaEditandoId ? { ...t, titulo, cursoId, fecha } : t
-    );
-    showToast("Tarea actualizada", "success");
-  } else {
-    state.tareas.push({ id: Date.now().toString(), titulo, cursoId, fecha, completada: false });
-    showToast("Tarea creada", "success");
-  }
-
-  persistir();
-  cerrarModal();
-}
-
-function editarTarea(id) {
-  const tarea = state.tareas.find(t => t.id === id);
-  if (!tarea) return;
-
-  tareaEditandoId = id;
-  switchFormType('tarea');
-  poblarSelectCursos();
-
-  document.getElementById('task-title').value = tarea.titulo;
-  document.getElementById('task-course').value = tarea.cursoId || '';
-  document.getElementById('task-date').value = tarea.fecha;
-  document.getElementById('modal-form').classList.remove('hidden');
-}
-
-function eliminarTarea(id) {
-  state.tareas = state.tareas.filter(t => t.id !== id);
-  persistir();
-  showToast("Tarea eliminada", "info");
-}
-
-function exportarACalendar(id) {
-  const tarea = state.tareas.find(t => t.id === id);
-  if (!tarea || !tarea.fecha) return;
-
-  const fechaObj = new Date(tarea.fecha);
-  const isoFecha = fechaObj.toISOString().replace(/-|:|\.\d\d\d/g, "");
-
-  const icsData = 
-`BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Agenda Académica//ES
-BEGIN:VEVENT
-SUMMARY:${tarea.titulo}
-DESCRIPTION:Entrega pendiente de la agenda académica.
-DTSTART:${isoFecha}
-DTEND:${isoFecha}
-END:VEVENT
-END:VCALENDAR`;
-
-  const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = window.URL.createObjectURL(blob);
-  link.setAttribute('download', `${tarea.titulo}.ics`);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  showToast("Archivo de evento descargado", "success");
-}
-
-// CURSOS
-function guardarCurso(e) {
-  e.preventDefault();
-  const nombre = document.getElementById('course-name').value.trim();
-  const aula = document.getElementById('course-room').value.trim();
-  const horaInicio = document.getElementById('course-start-time').value;
-  const horaFin = document.getElementById('course-end-time').value;
-  const fechaInicio = document.getElementById('course-start-date').value;
-  const semanasInput = document.getElementById('course-weeks');
-  const semanas = semanasInput ? (parseInt(semanasInput.value) || 16) : 16;
-  const color = document.getElementById('course-color').value;
-
-  const diasSeleccionados = Array.from(document.querySelectorAll('.day-check:checked'))
-                                 .map(cb => parseInt(cb.value));
-
-  if (!nombre || !aula || !horaInicio || !horaFin || !fechaInicio || diasSeleccionados.length === 0) {
-    showToast("Por favor completa todos los campos del curso", "danger");
-    return;
-  }
-
-  const fInicioObj = new Date(fechaInicio + 'T00:00:00');
-  const fFinObj = new Date(fInicioObj);
-  fFinObj.setDate(fFinObj.getDate() + (semanas * 7));
-  const fechaFin = fFinObj.toISOString().split('T')[0];
-
-  const datosCurso = { nombre, aula, dias: diasSeleccionados, horaInicio, horaFin, fechaInicio, semanas, fechaFin, color };
-
-  if (cursoEditandoId) {
-    state.cursos = state.cursos.map(c => c.id === cursoEditandoId ? { ...c, ...datosCurso } : c);
-    showToast("Curso actualizado", "success");
-  } else {
-    state.cursos.push({ id: Date.now().toString(), ...datosCurso });
-    showToast("Curso agregado", "success");
-  }
-
-  persistir();
-  cerrarModal();
-}
-
-function editarCurso(id) {
-  const curso = state.cursos.find(c => c.id === id);
-  if (!curso) return;
-
-  cursoEditandoId = id;
-  switchFormType('curso');
-
-  document.getElementById('course-name').value = curso.nombre;
-  document.getElementById('course-room').value = curso.aula;
-  document.getElementById('course-start-time').value = curso.horaInicio;
-  document.getElementById('course-end-time').value = curso.horaFin;
-  document.getElementById('course-start-date').value = curso.fechaInicio;
-  document.getElementById('course-weeks').value = curso.semanas || 16;
-  document.getElementById('course-color').value = curso.color;
-
-  document.querySelectorAll('.day-check').forEach(cb => {
-    cb.checked = (curso.dias || []).includes(parseInt(cb.value));
-  });
-
-  document.getElementById('modal-form').classList.remove('hidden');
-}
-
-function eliminarCurso(id) {
-  state.cursos = state.cursos.filter(c => c.id !== id);
-  state.calificaciones = state.calificaciones.filter(cal => cal.cursoId !== id);
-  persistir();
-  showToast("Curso eliminado", "info");
-}
-
-// CALIFICACIONES / NOTAS
-function guardarCalificacion(e) {
-  e.preventDefault();
-  const cursoId = document.getElementById('grade-course').value;
-  const titulo = document.getElementById('grade-title').value.trim();
-  const valor = document.getElementById('grade-value').value.trim();
-  const observacion = document.getElementById('grade-obs').value.trim();
-
-  if (!cursoId || !titulo || !valor) {
-    showToast("Completa la materia, concepto y calificación", "danger");
-    return;
-  }
-
-  state.calificaciones.push({
-    id: Date.now().toString(),
-    cursoId,
-    titulo,
-    valor,
-    observacion
-  });
-
-  persistir();
-  cerrarModal();
-  showToast("Nota registrada en el curso", "success");
-}
-
-function eliminarCalificacion(id) {
-  state.calificaciones = state.calificaciones.filter(c => c.id !== id);
-  persistir();
-  showToast("Nota eliminada", "info");
-}
-
-// RENDERIZADO
-function renderHoy() {
-  const container = document.getElementById('next-class-card');
-  if (!container) return;
-
-  const hoy = new Date();
-  const diaSemana = hoy.getDay(); 
-  const fechaHoyStr = hoy.toISOString().split('T')[0];
-  const horaActualStr = hoy.toTimeString().substring(0, 5);
-
-  const clasesHoy = state.cursos.filter(c => {
-    if (!c.dias || !c.fechaInicio) return false;
-    const fFin = c.fechaFin || c.fechaInicio;
-    return fechaHoyStr >= c.fechaInicio && fechaHoyStr <= fFin && c.dias.includes(diaSemana);
-  }).sort((a, b) => (a.horaInicio || '').localeCompare(b.horaInicio || ''));
-
-  if (clasesHoy.length === 0) {
-    container.innerHTML = '<p class="empty-msg">No hay clases programadas para hoy.</p>';
-  } else {
-    container.innerHTML = clasesHoy.map(c => {
-      const enCurso = horaActualStr >= c.horaInicio && horaActualStr <= c.horaFin;
-      return `
-        <div style="border-left: 4px solid ${c.color}; margin-bottom: 10px;" class="card">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong>${c.nombre}</strong>
-            ${enCurso ? '<span class="badge-live">EN CURSO</span>' : ''}
-          </div>
-          <p style="font-size:0.85rem; color:var(--text-dim); margin-top:4px;">${c.horaInicio} - ${c.horaFin} | Aula: ${c.aula}</p>
-        </div>
-      `;
-    }).join('');
-  }
-
-  const todayTasksContainer = document.getElementById('today-tasks-list');
-  if (!todayTasksContainer) return;
-
-  const tareasDeHoy = state.tareas.filter(t => t.fecha && t.fecha.startsWith(fechaHoyStr));
-
-  const totalHoy = tareasDeHoy.length;
-  const completadasHoy = tareasDeHoy.filter(t => t.completada).length;
-  const porcentaje = totalHoy > 0 ? Math.round((completadasHoy / totalHoy) * 100) : 100;
-  
-  const progressBar = document.getElementById('daily-progress-bar');
-  const progressText = document.getElementById('daily-progress-text');
-  if (progressBar) progressBar.style.width = `${porcentaje}%`;
-  if (progressText) progressText.innerText = totalHoy > 0 ? `${completadasHoy}/${totalHoy} completadas (${porcentaje}%)` : "Sin tareas pendientes hoy";
-
-  if (tareasDeHoy.length === 0) {
-    todayTasksContainer.innerHTML = '<p class="empty-msg">¡Todo al día por hoy!</p>';
-  } else {
-    todayTasksContainer.innerHTML = tareasDeHoy.map(t => {
-      const curso = state.cursos.find(c => c.id === t.cursoId);
-      return `
-        <div class="task-item ${t.completada ? 'completed' : ''}">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <input type="checkbox" ${t.completada ? 'checked' : ''} onchange="alternarTarea('${t.id}')">
-            <div>
-              <span>${t.titulo}</span>
-              <p class="empty-msg" style="font-size:0.8rem;">${curso ? curso.nombre : 'Sin curso'}</p>
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('');
+  if (headerTitle) {
+    const titulos = { hoy: 'Hoy', tareas: 'Entregas', cursos: 'Cursos', notas: 'Notas Rápidas' };
+    headerTitle.textContent = titulos[vistaId] || 'Mi Agenda';
   }
 }
 
-function filtrarTareas(filtro) {
-  filtroActual = filtro;
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.getAttribute('onclick').includes(filtro));
-  });
-  renderTareas();
-}
-
-function alternarTarea(id) {
-  state.tareas = state.tareas.map(t => t.id === id ? {...t, completada: !t.completada} : t);
-  persistir();
-}
-
-function guardarNotaRapida() {
-  const input = document.getElementById('quick-note-input');
-  if (!input || !input.value.trim()) return;
-  state.notas.unshift({ id: Date.now().toString(), texto: input.value });
-  input.value = '';
-  persistir();
-  showToast("Nota rápida guardada", "success");
-}
-
-function eliminarNota(id) {
-  state.notas = state.notas.filter(n => n.id !== id);
-  persistir();
-  showToast("Nota rápida eliminada", "info");
-}
+// ==========================================
+// MANTENIMIENTO Y RENDERIZADO
+// ==========================================
 
 function renderizarTodo() {
+  renderizarHoy();
+  renderizarTareas();
+  renderizarCursos();
+  renderizarNotas();
   poblarSelectCursos();
-  renderCursos();
-  renderTareas();
-  renderHoy();
-  renderNotas();
 }
 
-function renderNotas() {
-  const container = document.getElementById('notes-list');
-  if (!container) return;
-  if (state.notas.length === 0) {
-    container.innerHTML = '<p class="empty-msg">No hay notas temporales.</p>';
+function renderizarHoy() {
+  const today = new Date();
+  const dayOfWeek = today.getDay().toString(); // 0-6
+  const dateStr = today.toISOString().split('T')[0];
+
+  // 1. Clases de hoy
+  const clasesHoy = state.cursos.filter(c => c.dias && c.dias.includes(dayOfWeek));
+  const elClases = document.getElementById('next-class-card');
+  if (elClases) {
+    if (clasesHoy.length === 0) {
+      elClases.innerHTML = '<p class="empty-msg">No hay clases programadas para hoy.</p>';
+    } else {
+      elClases.innerHTML = clasesHoy.map(c => `
+        <div class="card" style="border-left: 4px solid ${c.color || '#3b82f6'}; padding: 10px; margin-bottom: 8px; background: var(--surface); border-radius: 8px;">
+          <strong>${c.nombre}</strong>
+          <div style="font-size: 0.85rem; color: var(--text-dim);">📍 Aula: ${c.aula} | ⏰ ${c.horaInicio} - ${c.horaFin}</div>
+        </div>
+      `).join('');
+    }
+  }
+
+  // 2. Entregas de hoy
+  const tareasHoy = state.tareas.filter(t => t.fecha && t.fecha.startsWith(dateStr));
+  const elTareasHoy = document.getElementById('today-tasks-list');
+  if (elTareasHoy) {
+    if (tareasHoy.length === 0) {
+      elTareasHoy.innerHTML = '<p class="empty-msg">¡Todo al día por hoy!</p>';
+    } else {
+      elTareasHoy.innerHTML = tareasHoy.map(t => crearHtmlTarea(t)).join('');
+    }
+  }
+
+  // 3. Barra de Progreso Diario
+  const completadasHoy = tareasHoy.filter(t => t.completada).length;
+  const pct = tareasHoy.length > 0 ? Math.round((completadasHoy / tareasHoy.length) * 100) : 0;
+  
+  const elBar = document.getElementById('daily-progress-bar');
+  const elText = document.getElementById('daily-progress-text');
+  if (elBar) elBar.style.width = `${pct}%`;
+  if (elText) elText.textContent = `${pct}% completado (${completadasHoy}/${tareasHoy.length})`;
+}
+
+function renderizarTareas() {
+  const elList = document.getElementById('all-tasks-list');
+  if (!elList) return;
+
+  let tareasFiltradas = state.tareas;
+  if (filtroActual === 'pendiente') tareasFiltradas = state.tareas.filter(t => !t.completada);
+  if (filtroActual === 'completada') tareasFiltradas = state.tareas.filter(t => t.completada);
+
+  if (tareasFiltradas.length === 0) {
+    elList.innerHTML = '<p class="empty-msg">No hay entregas registradas en esta categoría.</p>';
     return;
   }
-  container.innerHTML = state.notas.map(n => `
-    <div class="task-item">
-      <span>${n.texto}</span>
-      <button class="btn-delete" onclick="eliminarNota('${n.id}')">✕</button>
+
+  elList.innerHTML = tareasFiltradas.map(t => crearHtmlTarea(t)).join('');
+}
+
+function crearHtmlTarea(t) {
+  const cursoObj = state.cursos.find(c => c.id === t.cursoId);
+  const colorCurso = cursoObj ? cursoObj.color : '#3b82f6';
+  const nombreCurso = cursoObj ? cursoObj.nombre : 'General';
+
+  const fechaObj = new Date(t.fecha);
+  const fechaFormatted = isNaN(fechaObj) ? t.fecha : fechaObj.toLocaleString('es-ES', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return `
+    <div class="task-item ${t.completada ? 'completed' : ''}" style="border-left: 4px solid ${colorCurso}; display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--surface); margin-bottom: 8px; border-radius: 8px;">
+      <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+        <input type="checkbox" ${t.completada ? 'checked' : ''} onchange="toggleTarea('${t.id}')">
+        <div>
+          <strong style="${t.completada ? 'text-decoration: line-through; color: var(--text-dim);' : ''}">${t.titulo}</strong>
+          <div style="font-size: 0.8rem; color: var(--text-dim);">📘 ${nombreCurso} | 📅 ${fechaFormatted}</div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 5px;">
+        <button onclick="editarTarea('${t.id}')" style="background: none; border: none; cursor: pointer;">✏️</button>
+        <button onclick="eliminarTarea('${t.id}')" style="background: none; border: none; cursor: pointer;">🗑️</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderizarCursos() {
+  const elGrid = document.getElementById('courses-list');
+  if (!elGrid) return;
+
+  if (state.cursos.length === 0) {
+    elGrid.innerHTML = '<p class="empty-msg">No has agregado materias aún. Haz clic en + para agregar la primera.</p>';
+    return;
+  }
+
+  const mapDias = { '1':'L', '2':'M', '3':'X', '4':'J', '5':'V', '6':'S', '0':'D' };
+
+  elGrid.innerHTML = state.cursos.map(c => {
+    const strDias = (c.dias || []).map(d => mapDias[d] || d).join(', ');
+    return `
+      <div class="course-card" style="border-top: 5px solid ${c.color || '#3b82f6'}; background: var(--surface); padding: 12px; border-radius: 8px; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3>${c.nombre}</h3>
+          <div>
+            <button onclick="editarCurso('${c.id}')" style="background:none; border:none; cursor:pointer;">✏️</button>
+            <button onclick="eliminarCurso('${c.id}')" style="background:none; border:none; cursor:pointer;">🗑️</button>
+          </div>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-dim); margin-top: 4px;">📍 Aula: ${c.aula}</p>
+        <p style="font-size: 0.85rem; color: var(--text-dim);">🗓️ Días: ${strDias} (${c.horaInicio} - ${c.horaFin})</p>
+        <p style="font-size: 0.85rem; color: var(--text-dim);">🎓 Duración: ${c.semanas || 16} semanas</p>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderizarNotas() {
+  const elList = document.getElementById('notes-list');
+  if (!elList) return;
+
+  if (state.notas.length === 0) {
+    elList.innerHTML = '<p class="empty-msg">No hay notas rápidas guardadas.</p>';
+    return;
+  }
+
+  elList.innerHTML = state.notas.map(n => `
+    <div style="background: var(--surface); padding: 10px; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-start;">
+      <p style="white-space: pre-wrap; font-size: 0.9rem; flex: 1; margin: 0;">${n.texto}</p>
+      <button onclick="eliminarNota('${n.id}')" style="background:none; border:none; cursor:pointer; margin-left: 10px;">🗑️</button>
     </div>
   `).join('');
 }
 
 function poblarSelectCursos() {
-  const selectTask = document.getElementById('task-course');
-  const selectGrade = document.getElementById('grade-course');
-  const selectFilter = document.getElementById('task-filter-course');
+  const select = document.getElementById('task-course');
+  if (!select) return;
 
-  const rellenar = (el, placeholder) => {
-    if (!el) return;
-    const val = el.value;
-    el.innerHTML = `<option value="">${placeholder}</option>`;
-    state.cursos.forEach(c => {
-      el.innerHTML += `<option value="${c.id}">${c.nombre}</option>`;
+  const actualVal = select.value;
+  select.innerHTML = '<option value="">Selecciona un Curso (Opcional)</option>' + 
+    state.cursos.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('');
+  select.value = actualVal;
+}
+
+// ==========================================
+// ACCIONES Y OPERACIONES CRUD
+// ==========================================
+
+function toggleTarea(id) {
+  const t = state.tareas.find(x => x.id === id);
+  if (t) {
+    t.completada = !t.completada;
+    persistir();
+  }
+}
+
+function guardarTarea(e) {
+  e.preventDefault();
+  const titulo = document.getElementById('task-title').value;
+  const cursoId = document.getElementById('task-course').value;
+  const fecha = document.getElementById('task-date').value;
+
+  if (tareaEditandoId) {
+    const t = state.tareas.find(x => x.id === tareaEditandoId);
+    if (t) {
+      t.titulo = titulo;
+      t.cursoId = cursoId;
+      t.fecha = fecha;
+    }
+    tareaEditandoId = null;
+  } else {
+    state.tareas.push({
+      id: 't_' + Date.now(),
+      titulo,
+      cursoId,
+      fecha,
+      completada: false
     });
-    el.value = val;
-  };
-
-  rellenar(selectTask, "Selecciona un Curso (Opcional)");
-  rellenar(selectGrade, "Selecciona un Curso");
-  rellenar(selectFilter, "Todos los cursos");
-}
-
-function renderCursos() {
-  const container = document.getElementById('courses-list');
-  if (!container) return;
-  if (state.cursos.length === 0) {
-    container.innerHTML = '<p class="empty-msg">No has agregado cursos aún.</p>';
-    return;
   }
-  const diasNombres = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-  container.innerHTML = state.cursos.map(c => {
-    const notasDelCurso = state.calificaciones.filter(cal => cal.cursoId === c.id);
-
-    return `
-      <div class="card" style="border-left: 4px solid ${c.color}; margin-bottom: 12px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-          <div>
-            <h3>${c.nombre}</h3>
-            <p class="empty-msg">Aula: ${c.aula} | ${c.horaInicio} - ${c.horaFin}</p>
-            <p class="empty-msg" style="font-size:0.8rem;">Días: ${(c.dias || []).map(d => diasNombres[d]).join(', ')} (${c.semanas || 16} sem)</p>
-          </div>
-          <div style="display:flex; gap:6px;">
-            <button class="btn-delete" style="background:var(--surface); color:var(--text);" onclick="editarCurso('${c.id}')">✏️</button>
-            <button class="btn-delete" onclick="eliminarCurso('${c.id}')">✕</button>
-          </div>
-        </div>
-
-        <!-- Sección Registro de Calificaciones Integrado -->
-        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-            <strong style="font-size: 0.85rem; color: var(--text-dim);">Notas / Evaluaciones Registradas</strong>
-          </div>
-          ${notasDelCurso.length === 0 ? '<p class="empty-msg" style="font-size: 0.75rem;">Sin notas registradas aún.</p>' : ''}
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-            ${notasDelCurso.map(cal => `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg); padding: 4px 8px; border-radius: 6px; font-size:0.8rem;">
-                <div>
-                  <strong>${cal.titulo}:</strong> <span style="color:var(--primary); font-weight:bold;">${cal.valor}</span>
-                  ${cal.observacion ? `<p style="font-size: 0.7rem; color: var(--text-dim);">${cal.observacion}</p>` : ''}
-                </div>
-                <button onclick="eliminarCalificacion('${cal.id}')" style="background:none; border:none; color:#ef4444; cursor:pointer; font-size:0.75rem;">✕</button>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-
-      </div>
-    `;
-  }).join('');
+  cerrarModal();
+  persistir();
 }
 
-function renderTareas() {
-  const container = document.getElementById('all-tasks-list');
-  if (!container) return;
+function editarTarea(id) {
+  const t = state.tareas.find(x => x.id === id);
+  if (!t) return;
+
+  tareaEditandoId = id;
+  switchFormType('tarea');
+  abrirModal();
+
+  document.getElementById('task-title').value = t.titulo;
+  document.getElementById('task-course').value = t.cursoId || '';
+  document.getElementById('task-date').value = t.fecha;
+}
+
+function eliminarTarea(id) {
+  state.tareas = state.tareas.filter(x => x.id !== id);
+  persistir();
+}
+
+function guardarCurso(e) {
+  e.preventDefault();
+  const nombre = document.getElementById('course-name').value;
+  const aula = document.getElementById('course-room').value;
+  const horaInicio = document.getElementById('course-start-time').value;
+  const horaFin = document.getElementById('course-end-time').value;
+  const fechaInicio = document.getElementById('course-start-date').value;
+  const semanas = document.getElementById('course-weeks').value;
+  const color = document.getElementById('course-color').value;
+
+  const checks = document.querySelectorAll('.day-check:checked');
+  const dias = Array.from(checks).map(cb => cb.value);
+
+  if (cursoEditandoId) {
+    const c = state.cursos.find(x => x.id === cursoEditandoId);
+    if (c) {
+      c.nombre = nombre;
+      c.aula = aula;
+      c.horaInicio = horaInicio;
+      c.horaFin = horaFin;
+      c.fechaInicio = fechaInicio;
+      c.semanas = semanas;
+      c.color = color;
+      c.dias = dias;
+    }
+    cursoEditandoId = null;
+  } else {
+    state.cursos.push({
+      id: 'c_' + Date.now(),
+      nombre,
+      aula,
+      horaInicio,
+      horaFin,
+      fechaInicio,
+      semanas,
+      color,
+      dias
+    });
+  }
+
+  cerrarModal();
+  persistir();
+}
+
+function editarCurso(id) {
+  const c = state.cursos.find(x => x.id === id);
+  if (!c) return;
+
+  cursoEditandoId = id;
+  switchFormType('curso');
+  abrirModal();
+
+  document.getElementById('course-name').value = c.nombre;
+  document.getElementById('course-room').value = c.aula;
+  document.getElementById('course-start-time').value = c.horaInicio;
+  document.getElementById('course-end-time').value = c.horaFin;
+  document.getElementById('course-start-date').value = c.fechaInicio || '';
+  document.getElementById('course-weeks').value = c.semanas || 16;
+  document.getElementById('course-color').value = c.color || '#3b82f6';
+
+  document.querySelectorAll('.day-check').forEach(cb => {
+    cb.checked = (c.dias || []).includes(cb.value);
+  });
+}
+
+function eliminarCurso(id) {
+  state.cursos = state.cursos.filter(x => x.id !== id);
+  persistir();
+}
+
+function setSemanas(n) {
+  const input = document.getElementById('course-weeks');
+  if (input) input.value = n;
+}
+
+function guardarNotaRapida() {
+  const input = document.getElementById('quick-note-input');
+  if (!input || !input.value.trim()) return;
+
+  state.notas.push({
+    id: 'n_' + Date.now(),
+    texto: input.value.trim(),
+    fecha: new Date().toISOString()
+  });
+
+  input.value = '';
+  persistir();
+}
+
+function eliminarNota(id) {
+  state.notas = state.notas.filter(x => x.id !== id);
+  persistir();
+}
+
+function filtrarTareas(tipo) {
+  filtroActual = tipo;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+  renderizarTareas();
+}
+
+// ==========================================
+// MODAL Y UTILIDADES
+// ==========================================
+
+function abrirModal() {
+  const modal = document.getElementById('modal-form');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function cerrarModal() {
+  const modal = document.getElementById('modal-form');
+  if (modal) modal.classList.add('hidden');
+  tareaEditandoId = null;
+  cursoEditandoId = null;
   
-  let tareasFiltradas = [...state.tareas];
-  const busqueda = (document.getElementById('task-search-input')?.value || '').toLowerCase();
-  const filtroCurso = document.getElementById('task-filter-course')?.value || '';
-
-  if (filtroActual === 'pendiente') {
-    tareasFiltradas = tareasFiltradas.filter(t => !t.completada);
-  } else if (filtroActual === 'completada') {
-    tareasFiltradas = tareasFiltradas.filter(t => t.completada);
-  }
-
-  if (filtroCurso) {
-    tareasFiltradas = tareasFiltradas.filter(t => t.cursoId === filtroCurso);
-  }
-
-  if (busqueda) {
-    tareasFiltradas = tareasFiltradas.filter(t => t.titulo.toLowerCase().includes(busqueda));
-  }
-
-  tareasFiltradas.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-
-  if (tareasFiltradas.length === 0) {
-    container.innerHTML = '<p class="empty-msg">No hay tareas en esta sección.</p>';
-    return;
-  }
-
-  const ahora = new Date();
-
-  container.innerHTML = tareasFiltradas.map(t => {
-    const curso = state.cursos.find(c => c.id === t.cursoId);
-    const fechaObj = new Date(t.fecha);
-    const estaVencida = !t.completada && fechaObj < ahora;
-    const fechaFormatted = t.fecha ? fechaObj.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : 'Sin fecha';
-
-    return `
-      <div class="task-item ${t.completada ? 'completed' : ''} ${estaVencida ? 'vencida' : ''}">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <input type="checkbox" ${t.completada ? 'checked' : ''} onchange="alternarTarea('${t.id}')">
-          <div>
-            <span>${t.titulo}</span>
-            <p class="empty-msg" style="font-size:0.8rem;">
-              ${curso ? curso.nombre : 'Sin curso'} - ${fechaFormatted}
-              ${estaVencida ? '<span class="badge-vencida">VENCIDA</span>' : ''}
-            </p>
-          </div>
-        </div>
-        <div style="display:flex; gap:4px;">
-          <button class="btn-delete" style="background:var(--surface); color:var(--text);" onclick="exportarACalendar('${t.id}')" title="Agregar a Calendario">📅</button>
-          <button class="btn-delete" style="background:var(--surface); color:var(--text);" onclick="editarTarea('${t.id}')">✏️</button>
-          <button class="btn-delete" onclick="eliminarTarea('${t.id}')">✕</button>
-        </div>
-      </div>
-    `;
-  }).join('');
+  const formT = document.getElementById('form-tarea');
+  const formC = document.getElementById('form-curso');
+  if (formT) formT.reset();
+  if (formC) formC.reset();
 }
 
-function actualizarFechaHeader() {
-  const el = document.getElementById('header-date');
-  if (!el) return;
-  const opciones = { weekday: 'short', day: 'numeric', month: 'short' };
-  el.innerText = new Date().toLocaleDateString('es-ES', opciones);
+function switchFormType(tipo) {
+  const formT = document.getElementById('form-tarea');
+  const formC = document.getElementById('form-curso');
+  const tabT = document.getElementById('tab-opt-tarea');
+  const tabC = document.getElementById('tab-opt-curso');
+
+  if (tipo === 'tarea') {
+    formT.classList.remove('hidden');
+    formC.classList.add('hidden');
+    tabT.classList.add('active');
+    tabC.classList.remove('active');
+  } else {
+    formC.classList.remove('hidden');
+    formT.classList.add('hidden');
+    tabC.classList.add('active');
+    tabT.classList.remove('active');
+  }
+}
+
+function exportarDatos() {
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+  const dlAnchorElem = document.createElement('a');
+  dlAnchorElem.setAttribute("href", dataStr);
+  dlAnchorElem.setAttribute("download", `agenda_backup_${new Date().toISOString().split('T')[0]}.json`);
+  dlAnchorElem.click();
+}
+
+function importarDatos(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(evt) {
+    try {
+      const parsed = JSON.parse(evt.target.result);
+      if (parsed.cursos || parsed.tareas) {
+        state = {
+          cursos: parsed.cursos || [],
+          tareas: parsed.tareas || [],
+          notas: parsed.notas || [],
+          calificaciones: parsed.calificaciones || []
+        };
+        persistir();
+        alert('¡Copia de seguridad importada y sincronizada correctamente!');
+      }
+    } catch (err) {
+      alert('Error al leer el archivo de copia de seguridad.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function verificarRecordatorios() {
+  // Función auxiliar para notificaciones nativas si están permitidas
+  if ("Notification" in window && Notification.permission === "granted") {
+    // Lógica opcional de recordatorios
+  }
 }
