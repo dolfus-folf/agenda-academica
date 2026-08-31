@@ -71,7 +71,7 @@ function persistir() {
 document.addEventListener('DOMContentLoaded', () => {
   actualizarFechaHeader();
   iniciarSincronizacionFirebase();
-  verificarRecordatorios();
+  solicitarPermisoNotificaciones();
 });
 
 function actualizarFechaHeader() {
@@ -83,6 +83,42 @@ function actualizarFechaHeader() {
     elDate.textContent = fechaTexto.charAt(0).toUpperCase() + fechaTexto.slice(1);
   }
 }
+
+// ==========================================
+// NOTIFICACIONES
+// ==========================================
+
+function solicitarPermisoNotificaciones() {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}
+
+function verificarRecordatorios() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const ahora = new Date();
+  
+  state.tareas.forEach(t => {
+    if (t.completada || !t.fecha) return;
+    
+    const fechaTarea = new Date(t.fecha);
+    const diffMinutos = (fechaTarea - ahora) / (1000 * 60);
+
+    // Notificar si faltan entre 0 y 60 minutos para la entrega
+    if (diffMinutos > 0 && diffMinutos <= 60 && !t.notificado) {
+      new Notification("⏰ Entrega Próxima", {
+        body: `La tarea "${t.titulo}" vence pronto.`,
+        icon: "https://cdn-icons-png.flaticon.com/512/2693/2693507.png"
+      });
+      t.notificado = true;
+      persistir();
+    }
+  });
+}
+
+// Revisar recordatorios cada 5 minutos
+setInterval(verificarRecordatorios, 5 * 60 * 1000);
 
 // ==========================================
 // NAVEGACIÓN Y VISTAS
@@ -104,7 +140,7 @@ function cambiarVista(vistaId, btn) {
 }
 
 // ==========================================
-// MANTENIMIENTO Y RENDERIZADO
+// RENDERIZADO GENERAL
 // ==========================================
 
 function renderizarTodo() {
@@ -228,6 +264,29 @@ function renderizarCursos() {
   }).join('');
 }
 
+// ==========================================
+// NOTAS RÁPIDAS
+// ==========================================
+
+function guardarNotaRapida() {
+  const input = document.getElementById('quick-note-input');
+  if (!input || !input.value.trim()) return;
+
+  state.notas.push({
+    id: 'n_' + Date.now(),
+    texto: input.value.trim(),
+    fecha: new Date().toISOString()
+  });
+
+  input.value = '';
+  persistir();
+}
+
+function eliminarNota(id) {
+  state.notas = state.notas.filter(x => x.id !== id);
+  persistir();
+}
+
 function renderizarNotas() {
   const elList = document.getElementById('notes-list');
   if (!elList) return;
@@ -287,7 +346,8 @@ function guardarTarea(e) {
       titulo,
       cursoId,
       fecha,
-      completada: false
+      completada: false,
+      notificado: false
     });
   }
 
@@ -388,25 +448,6 @@ function setSemanas(n) {
   if (input) input.value = n;
 }
 
-function guardarNotaRapida() {
-  const input = document.getElementById('quick-note-input');
-  if (!input || !input.value.trim()) return;
-
-  state.notas.push({
-    id: 'n_' + Date.now(),
-    texto: input.value.trim(),
-    fecha: new Date().toISOString()
-  });
-
-  input.value = '';
-  persistir();
-}
-
-function eliminarNota(id) {
-  state.notas = state.notas.filter(x => x.id !== id);
-  persistir();
-}
-
 function filtrarTareas(tipo) {
   filtroActual = tipo;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -485,10 +526,4 @@ function importarDatos(e) {
     }
   };
   reader.readAsText(file);
-}
-
-function verificarRecordatorios() {
-  if ("Notification" in window && Notification.permission === "granted") {
-    // Lógica opcional de recordatorios
-  }
 }
