@@ -1,19 +1,75 @@
-// Estado global
+// Estado global en memoria
 let state = {
-  cursos: JSON.parse(localStorage.getItem('app_cursos')) || [],
-  tareas: JSON.parse(localStorage.getItem('app_tareas')) || [],
-  notas: JSON.parse(localStorage.getItem('app_notas')) || [],
-  calificaciones: JSON.parse(localStorage.getItem('app_calificaciones')) || []
+  cursos: [],
+  tareas: [],
+  notas: [],
+  calificaciones: []
 };
 
 let filtroActual = 'todas';
 let tareaEditandoId = null;
 let cursoEditandoId = null;
 
+// Identificador del documento único en Firestore
+const DOC_ID = "mi_agenda_usuario"; 
+
+// Escuchar cambios en la nube en tiempo real
+function iniciarSincronizacionFirebase() {
+  if (!window.db) {
+    setTimeout(iniciarSincronizacionFirebase, 300);
+    return;
+  }
+
+  const docRef = window.fsDoc(window.db, "agendas", DOC_ID);
+  
+  // onSnapshot escucha cambios en tiempo real desde Firestore
+  window.fsOnSnapshot(docRef, (docSnap) => {
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      state = {
+        cursos: data.cursos || [],
+        tareas: data.tareas || [],
+        notas: data.notas || [],
+        calificaciones: data.calificaciones || []
+      };
+      renderizarTodo();
+    } else {
+      // Si el documento en la nube aún no existe, cargamos lo local o lo creamos
+      const localCursos = JSON.parse(localStorage.getItem('app_cursos')) || [];
+      const localTareas = JSON.parse(localStorage.getItem('app_tareas')) || [];
+      const localNotas = JSON.parse(localStorage.getItem('app_notas')) || [];
+      const localCalificaciones = JSON.parse(localStorage.getItem('app_calificaciones')) || [];
+
+      if (localCursos.length || localTareas.length) {
+        state = { cursos: localCursos, tareas: localTareas, notas: localNotas, calificaciones: localCalificaciones };
+        persistir();
+      }
+    }
+  });
+}
+
+// Guardar los cambios hacia Firestore (y respaldo local)
+function persistir() {
+  // Guardar copia de respaldo en el almacenamiento local del navegador
+  localStorage.setItem('app_cursos', JSON.stringify(state.cursos));
+  localStorage.setItem('app_tareas', JSON.stringify(state.tareas));
+  localStorage.setItem('app_notas', JSON.stringify(state.notas));
+  localStorage.setItem('app_calificaciones', JSON.stringify(state.calificaciones));
+  
+  renderizarTodo();
+
+  // Enviar cambio a Firebase Firestore
+  if (window.db) {
+    const docRef = window.fsDoc(window.db, "agendas", DOC_ID);
+    window.fsSetDoc(docRef, state)
+      .catch(err => console.error("Error al sincronizar con Firebase:", err));
+  }
+}
+
 // Inicialización
 document.addEventListener('DOMContentLoaded', () => {
   actualizarFechaHeader();
-  renderizarTodo();
+  iniciarSincronizacionFirebase();
   registrarServiceWorker();
   verificarRecordatorios();
 });

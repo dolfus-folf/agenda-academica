@@ -17,7 +17,6 @@
       <span id="header-date" class="date-badge"></span>
     </div>
     <div class="header-actions">
-      <button type="button" class="btn-icon" onclick="solicitarNotificaciones()" title="Activar Notificaciones">🔔</button>
       <button type="button" class="btn-icon" onclick="exportarDatos()" title="Exportar Copia de Seguridad">💾</button>
       <button type="button" class="btn-icon" onclick="document.getElementById('import-file').click()" title="Importar Copia de Seguridad">📂</button>
       <input type="file" id="import-file" style="display:none" accept=".json" onchange="importarDatos(event)">
@@ -59,14 +58,6 @@
         <button class="filter-btn" onclick="filtrarTareas('pendiente')">Pendientes</button>
         <button class="filter-btn" onclick="filtrarTareas('completada')">Completadas</button>
       </div>
-
-      <div class="search-bar-box">
-        <input type="text" id="task-search-input" placeholder="🔍 Buscar tarea..." oninput="renderTareas()">
-        <select id="task-filter-course" onchange="renderTareas()">
-          <option value="">Todos los cursos</option>
-        </select>
-      </div>
-
       <div id="all-tasks-list" class="task-list"></div>
     </section>
 
@@ -89,7 +80,7 @@
   <!-- Botón Flotante (FAB) -->
   <button id="fab-btn" class="fab" type="button" onclick="abrirModal()">+</button>
 
-  <!-- Modal para Crear Tarea/Curso/Nota Académica -->
+  <!-- Modal para Crear Tarea/Curso -->
   <div id="modal-form" class="modal hidden">
     <div class="modal-content">
       <span class="close-btn" onclick="cerrarModal()">&times;</span>
@@ -98,7 +89,6 @@
       <div class="modal-tabs">
         <button id="tab-opt-tarea" type="button" class="tab-btn active" onclick="switchFormType('tarea')">Tarea</button>
         <button id="tab-opt-curso" type="button" class="tab-btn" onclick="switchFormType('curso')">Curso</button>
-        <button id="tab-opt-nota" type="button" class="tab-btn" onclick="switchFormType('nota')">Nota Nota</button>
       </div>
 
       <!-- Formulario Tareas -->
@@ -113,7 +103,7 @@
 
       <!-- Formulario Cursos -->
       <form id="form-curso" class="hidden" onsubmit="guardarCurso(event)">
-        <input type="text" id="course-name" placeholder="Nombre de la materia (ej. Redes)" required>
+        <input type="text" id="course-name" placeholder="Nombre de la materia (ej. Sistemas Operativos)" required>
         <input type="text" id="course-room" placeholder="Aula (ej. Lab 204)" required>
 
         <label style="font-size:0.85rem; color:var(--text-dim); display:block; margin-top:8px;">Días de clase:</label>
@@ -142,9 +132,9 @@
           <input type="number" id="course-weeks" value="16" min="1" max="52" required style="width:100%; margin-bottom:6px;">
           
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button type="button" onclick="setSemanas(4)" class="chip-btn">⚡ 4 sem</button>
-            <button type="button" onclick="setSemanas(8)" class="chip-btn">📘 8 sem</button>
-            <button type="button" onclick="setSemanas(16)" class="chip-btn">🎓 16 sem</button>
+            <button type="button" onclick="setSemanas(4)" style="padding:4px 8px; font-size:0.75rem; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer;">⚡ 4 sem</button>
+            <button type="button" onclick="setSemanas(8)" style="padding:4px 8px; font-size:0.75rem; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer;">📘 8 sem</button>
+            <button type="button" onclick="setSemanas(16)" style="padding:4px 8px; font-size:0.75rem; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer;">🎓 16 sem</button>
           </div>
         </div>
 
@@ -156,22 +146,8 @@
         <button type="submit" class="btn-primary">Guardar Curso</button>
       </form>
 
-      <!-- Formulario Registrar Nota/Calificación -->
-      <form id="form-nota" class="hidden" onsubmit="guardarCalificacion(event)">
-        <select id="grade-course" required>
-          <option value="">Selecciona un Curso</option>
-        </select>
-        <input type="text" id="grade-title" placeholder="Evaluación (ej. Parcial 1, Práctica 2)" required>
-        <input type="text" id="grade-value" placeholder="Calificación (ej. 17 / 20)" required>
-        <input type="text" id="grade-obs" placeholder="Observación (ej. Falto revisar pregunta 3)">
-        <button type="submit" class="btn-primary">Registrar Nota</button>
-      </form>
-
     </div>
   </div>
-
-  <!-- Contenedor de Toasts -->
-  <div id="toast-container"></div>
 
   <!-- Barra de Navegación Inferior -->
   <nav class="bottom-nav">
@@ -180,6 +156,28 @@
     <button class="nav-btn" onclick="cambiarVista('cursos', this)">Cursos</button>
     <button class="nav-btn" onclick="cambiarVista('notas', this)">Notas</button>
   </nav>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+// Configuración con tus claves reales de Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyCd3Jcgu2jkTucCgZ3-lJ_exygUIDG3OHk",
+      authDomain: "agenda-academica-f2111.firebaseapp.com",
+      projectId: "agenda-academica-f2111",
+      storageBucket: "agenda-academica-f2111.firebasestorage.app",
+      messagingSenderId: "893970697850",
+      appId: "1:893970697850:web:769c5f8ec78a7367ef35c3"
+    };
+
+    // Exponer instancias al ámbito global para app.js
+    const app = initializeApp(firebaseConfig);
+    window.db = getFirestore(app);
+    window.fsDoc = doc;
+    window.fsOnSnapshot = onSnapshot;
+    window.fsSetDoc = setDoc;
+  </script>
 
   <script src="app.js"></script>
 </body>
